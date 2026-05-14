@@ -16,8 +16,8 @@ def classifier(img, weights_name, class_names):
         probs = r.probs.data.cpu().numpy()
         class_id = int(np.argmax(probs))
         confidence = float(probs[class_id])
-        annotated = results[0].plot()
-        return class_names[class_id], confidence, annotated
+
+        return class_names[class_id], confidence
 
     # If detection/segmentation model
     elif hasattr(r, "boxes") and r.boxes is not None and len(r.boxes) > 0:
