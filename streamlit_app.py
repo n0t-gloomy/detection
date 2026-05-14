@@ -11,6 +11,10 @@ data = {
     "Oral Infections V1 (Canker Sores, Cold Sores, Mouth Cancer, Normal, Oral Thrush)": {
         "class_names": ['Canker Sores', 'Cold Sores', 'Mouth Cancer', 'Normal', 'Oral Thrush'],
         "weights_name": "exp-3.pt",
+    },
+    "Oral Infections V2 (Canker Sores, Herpes, Normal, Oral Cancer, Oral Thrush)": {
+        "class_names": ['Canker Sores', 'Herpes', 'Normal', 'Oral Cancer', 'Oral Thrush'],
+        "weights_name": "oral.pt",
     }
 }
 
