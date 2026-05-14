@@ -1,25 +1,24 @@
 from ultralytics import YOLO
 import numpy as np
 
-# Load model once (important for performance)
-model = YOLO("weights/exp-3.pt")
+models_cache = {}
+
+def get_model(weights_name):
+    if weights_name not in models_cache:
+        models_cache[weights_name] = YOLO(f"weights/{weights_name}")
+    return models_cache[weights_name]
 
 def classifier(img, weights_name, class_names):
-    # YOLO accepts PIL directly, no resize needed
+    model = get_model(weights_name)
     results = model(img)
-
-    # Get first result
     r = results[0]
 
-    # If classification model
     if hasattr(r, "probs") and r.probs is not None:
-        probs = r.probs.data.cpu().numpy()
-        class_id = int(np.argmax(probs))
-        confidence = float(probs[class_id])
+        class_id = int(r.probs.top1)
+        confidence = float(r.probs.top1conf)
 
-        return class_names[class_id], confidence
+        return model.names[class_id], confidence
 
-    # If detection/segmentation model
     elif hasattr(r, "boxes") and r.boxes is not None and len(r.boxes) > 0:
         confs = r.boxes.conf.cpu().numpy()
         class_ids = r.boxes.cls.cpu().numpy().astype(int)
@@ -28,6 +27,6 @@ def classifier(img, weights_name, class_names):
         class_id = class_ids[best_idx]
         confidence = float(confs[best_idx])
 
-        return class_names[class_id], confidence
+        return model.names[class_id], confidence
 
     return "No detection", 0.0
