@@ -19,7 +19,7 @@ data = {
 }
 
 # --- Page Config ---
-st.set_page_config(page_title="Oral Image Classifier", layout="wide")
+st.set_page_config(page_title="Image Classifier", layout="wide")
 
 
 # --- Session State ---
@@ -65,7 +65,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="title">🧠 Oral Image Classification</div>', unsafe_allow_html=True)
+st.markdown('<div class="title">🧠 Image Classification</div>', unsafe_allow_html=True)
 
 
 # --- Model Selection ---
