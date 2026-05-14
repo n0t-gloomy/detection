@@ -61,7 +61,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="title">🧠 Medical Image Classification</div>', unsafe_allow_html=True)
+st.markdown('<div class="title">🧠 Oral Image Classification</div>', unsafe_allow_html=True)
 
 
 # --- Model Selection ---
