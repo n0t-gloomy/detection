@@ -100,7 +100,7 @@ if uploaded_file:
 
         if st.button("🚀 Run Classification"):
             with st.spinner("Classifying..."):
-                label, score, annotated = models.classifier(
+                label, score = models.classifier(
                     img,
                     model_data["weights_name"],
                     model_data["class_names"]
