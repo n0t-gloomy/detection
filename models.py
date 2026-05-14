@@ -2,7 +2,7 @@ from ultralytics import YOLO
 import numpy as np
 
 # Load model once (important for performance)
-model = YOLO("exp-3.pt")
+model = YOLO("weights/exp-3.pt")
 
 def classifier(img, weights_name, class_names):
     # YOLO accepts PIL directly, no resize needed
