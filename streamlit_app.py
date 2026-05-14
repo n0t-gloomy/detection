@@ -15,7 +15,7 @@ data = {
 }
 
 # --- Page Config ---
-st.set_page_config(page_title="Medical Image Classifier", layout="wide")
+st.set_page_config(page_title="Oral Image Classifier", layout="wide")
 
 
 # --- Session State ---
