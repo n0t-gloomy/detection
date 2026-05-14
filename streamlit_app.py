@@ -8,7 +8,7 @@ import models
 
 # --- Model Data ---
 data = {
-    "Oral Infections (Canker Sores, Cold Sores, Mouth Cancer, Normal, Oral Thrush)": {
+    "Oral Infections V1 (Canker Sores, Cold Sores, Mouth Cancer, Normal, Oral Thrush)": {
         "class_names": ['Canker Sores', 'Cold Sores', 'Mouth Cancer', 'Normal', 'Oral Thrush'],
         "weights_name": "exp-3.pt",
     }
