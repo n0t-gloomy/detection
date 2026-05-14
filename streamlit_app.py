@@ -70,7 +70,7 @@ model_data = data[model_name]
 
 
 # --- Upload ---
-uploaded_file = st.file_uploader("📤 Upload an Image", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("📤 Upload/Drop an Image", type=["jpg", "jpeg", "png"])
 
 
 if uploaded_file:
