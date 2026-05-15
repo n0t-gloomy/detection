@@ -498,9 +498,9 @@ uploaded_file = st.file_uploader(
 
     "📤 Upload an image",
 
-    type=["jpg", "jpeg", "png"],
+    type=["jpg", "jpeg", "png", "webp"],
 
-    help="Supported formats: JPG, JPEG, PNG"
+    help="Supported formats: JPG, JPEG, PNG, WEBP"
 
 )
 
@@ -752,7 +752,7 @@ else:
 
         1. Select a model from the dropdown (or specify path)
 
-        2. Upload an image (JPG, JPEG, or PNG)
+        2. Upload an image (JPG, JPEG, PNG, or WEBP)
 
         3. Model classifies the image
 
