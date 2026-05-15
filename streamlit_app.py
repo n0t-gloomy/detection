@@ -73,7 +73,8 @@ class GradCAM:
         self._hooks.clear()
 
     def _save_activation(self, module, input, output):
-        self._activations = output.detach()
+        # Keep a version WITH grad_fn so backward can flow through it
+        self._activations = output
 
     def _save_gradient(self, module, grad_input, grad_output):
         self._gradients = grad_output[0].detach()
@@ -90,37 +91,50 @@ class GradCAM:
             heatmap: (H_cam, W_cam) numpy array in [0, 1]
             target_class: int, the class that was explained
         """
+        # Temporarily re-enable gradients for all model parameters
+        # (YOLO wraps inference in torch.no_grad() by default)
+        for p in self.nn_model.parameters():
+            p.requires_grad_(True)
+
         self.nn_model.eval()
         self._register_hooks()
 
         try:
-            # ---- forward pass through the raw nn model ----
-            output = self.nn_model(image_tensor)
+            # torch.enable_grad() overrides any outer no_grad context
+            with torch.enable_grad():
+                # Give the input a grad_fn so the graph is built
+                image_tensor = image_tensor.detach().requires_grad_(True)
 
-            # YOLO may return a list (e.g. [logits, extra]) — take the first
-            if isinstance(output, (list, tuple)):
-                output = output[0]
+                # ---- forward pass through the raw nn model ----
+                output = self.nn_model(image_tensor)
 
-            # Squeeze batch & spatial dims if needed → shape (num_classes,)
-            if output.dim() == 4:          # (B, C, 1, 1)
-                output = output.squeeze(-1).squeeze(-1)
-            if output.dim() == 2:          # (B, num_classes)
-                output = output[0]
+                # YOLO may return a list (e.g. [logits, extra]) — take the first
+                if isinstance(output, (list, tuple)):
+                    output = output[0]
 
-            if target_class is None:
-                target_class = int(output.argmax().item())
+                # Squeeze batch & spatial dims if needed → shape (num_classes,)
+                if output.dim() == 4:          # (B, C, 1, 1)
+                    output = output.squeeze(-1).squeeze(-1)
+                if output.dim() == 2:          # (B, num_classes)
+                    output = output[0]
 
-            # ---- backward pass ----
-            self.nn_model.zero_grad()
-            one_hot = torch.zeros_like(output)
-            one_hot[target_class] = 1.0
-            output.backward(gradient=one_hot, retain_graph=False)
+                if target_class is None:
+                    target_class = int(output.argmax().item())
+
+                # ---- backward pass ----
+                self.nn_model.zero_grad()
+                one_hot = torch.zeros_like(output)
+                one_hot[target_class] = 1.0
+                output.backward(gradient=one_hot, retain_graph=False)
 
             # ---- compute CAM ----
             # gradients / activations: (1, C, H, W)
-            weights = self._gradients.mean(dim=(2, 3), keepdim=True)  # global avg pool
-            cam = (weights * self._activations).sum(dim=1, keepdim=True)  # weighted sum
-            cam = F.relu(cam)                                              # keep positives
+            activations = self._activations.detach()
+            gradients  = self._gradients          # already detached in hook
+
+            weights = gradients.mean(dim=(2, 3), keepdim=True)   # global avg pool
+            cam = (weights * activations).sum(dim=1, keepdim=True)  # weighted sum
+            cam = F.relu(cam)                                         # keep positives
 
             # Normalise to [0, 1]
             cam = cam.squeeze().cpu().numpy()
@@ -133,6 +147,9 @@ class GradCAM:
 
         finally:
             self._remove_hooks()
+            # Restore inference-safe state: disable grads on params
+            for p in self.nn_model.parameters():
+                p.requires_grad_(False)
 
 
 def overlay_heatmap(image_np, heatmap, alpha=0.45):
