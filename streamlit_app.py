@@ -155,7 +155,18 @@ if uploaded_file is not None:
 
 
     else:
-        st.warning("⚠️ No classification probabilities found. Is this a YOLO **classification** model?")
+        with col2:
+            st.warning("⚠️ No classification probabilities found.")
+            # Try to show detection boxes if this is a detection model
+            if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes):
+                st.info("This looks like a **detection** model (not classification). Detections found:")
+                for box in result.boxes:
+                    cls_id = int(box.cls.item())
+                    cls_name = result.names[cls_id]
+                    conf = box.conf.item()
+                    st.write(f"• `{cls_name}` — {conf:.1%}")
+            else:
+                st.info("Make sure your model was trained for **classification** (not detection/segmentation).")
 
 else:
     st.info("👆 Upload an image to get started")
@@ -169,24 +180,19 @@ with st.expander("ℹ️ About this app"):
 ### Features
 - **YOLO Classification**: Fast, accurate predictions
 - **Model Selection**: Choose from available models via dropdown
-- **Grad-CAM Visualization**: Understand model decisions
-- **Configurable Image Size**: Trade quality for speed
-- **Top-K Predictions**: See alternative classifications
-- **Confidence Display**: Know how certain the model is
+- **Top-K Predictions**: See alternative classifications with confidence scores
+- **Confidence Threshold**: Filter out low-confidence predictions
 
 ### How it works
 1. Select a model from the dropdown (or specify path)
 2. Upload an image (JPG, JPEG, PNG, or WEBP)
-3. Model classifies the image
-4. Image is resized to a YOLO-compatible size (divisible by 32)
-5. Grad-CAM shows which regions influenced the decision
-6. Red = high importance, Blue = low importance
+3. Model classifies the image and returns probabilities
+4. Top predictions are displayed with a progress bar
 
 ### Tips
-- **Image Size**: Larger size = better visualization but slower processing
-- **Heatmap Opacity**: Adjust for better visibility (0.3–0.7 recommended)
-- **Confidence Threshold**: Filter low-confidence predictions
-- **Different Models**: Try different models for different results
+- **Confidence Threshold**: Raise it to hide low-confidence classes
+- **Different Models**: Different .pt files may be trained on different classes
+- **Image formats**: RGBA/palette PNGs are auto-converted to RGB
 
 ### Supported Models
 - YOLO Classification models (.pt format)
