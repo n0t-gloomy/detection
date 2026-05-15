@@ -29,186 +29,52 @@ from pathlib import Path
 
 
 class GradCAM:
-
-    """Gradient-weighted Class Activation Mapping"""
-
-   
-
-    def __init__(self, model):
-
+    def __init__(self, model, target_layer):
         self.model = model
-
-        self.device = next(model.parameters()).device
-
+        self.target_layer = target_layer
         self.gradients = None
-
         self.activations = None
-
-        self._register_hooks()
-
-   
-
-    def _register_hooks(self):
-
-        """Register forward and backward hooks"""
-
-        def forward_hook(module, input, output):
-
-            self.activations = output.detach()
-
-       
-
-        def backward_hook(module, grad_input, grad_output):
-
-            self.gradients = grad_output[0].detach()
-
-       
-
-        # Hook into last conv layer
-
-        last_conv = None
-
-        for module in self.model.modules():
-
-            if isinstance(module, torch.nn.Conv2d):
-
-                last_conv = module
-
-       
-
-        if last_conv:
-
-            last_conv.register_forward_hook(forward_hook)
-
-            last_conv.register_full_backward_hook(backward_hook)
-
-   
-
-    def generate(self, input_tensor, target_class=None):
-
-        """
-
-        Generate Grad-CAM heatmap
-
-       
-
-        Args:
-
-            input_tensor: Input image tensor (B, C, H, W)
-
-            target_class: Target class index (if None, uses predicted class)
-
-        """
-
+        
+        # Register hooks
+        target_layer.register_forward_hook(self.save_activation)
+        target_layer.register_full_backward_hook(self.save_gradient)
+    
+    def save_activation(self, module, input, output):
+        self.activations = output.detach()
+    
+    def save_gradient(self, module, grad_input, grad_output):
+        self.gradients = grad_output[0].detach()
+    
+    def __call__(self, x, class_idx=None):
         self.model.eval()
-
-       
-
-        # Ensure input has correct shape (B, C, H, W) and divisible by 32
-
-        if input_tensor.dim() != 4:
-
-            raise ValueError(f"Input must be 4D tensor, got {input_tensor.dim()}D")
-
-       
-
-        b, c, h, w = input_tensor.shape
-
-        if h % 32 != 0 or w % 32 != 0:
-
-            raise ValueError(f"Image dimensions ({h}, {w}) must be divisible by 32")
-
-       
-
-        with torch.enable_grad():
-
-            input_tensor.requires_grad_(True)
-
-            output = self.model(input_tensor)
-
-           
-
-            # Handle different output formats
-
-            if hasattr(output, 'probs'):
-
-                # Classification output with probs attribute
-
-                probs = output.probs.data  # Shape: (batch_size, num_classes)
-
-                if target_class is None:
-
-                    target_class = probs.argmax(dim=1)[0].item()
-
-                score = probs[0, target_class]  # Get score for target class
-
-            elif isinstance(output, torch.Tensor):
-
-                # Raw tensor output
-
-                if output.dim() > 1:
-
-                    if target_class is None:
-
-                        target_class = output.argmax(dim=1)[0].item()
-
-                    score = output[0, target_class]
-
-                else:
-
-                    score = output.max()
-
-            else:
-
-                raise ValueError(f"Unexpected output type: {type(output)}")
-
-       
-
+        output = self.model(x)
+        
+        # FIX: Handle list output from model
+        if isinstance(output, list):
+            output = output[0]  # Take the first element (usually the classification logits)
+        
+        if class_idx is None:
+            class_idx = output.argmax(dim=1).item()
+        
         self.model.zero_grad()
-
-        score.backward(retain_graph=True)
-
-       
-
-        if self.gradients is None or self.activations is None:
-
-            raise RuntimeError("Failed to capture gradients or activations")
-
-       
-
-        # Ensure gradients and activations are 4D (B, C, H, W)
-
-        if self.gradients.dim() == 4 and self.activations.dim() == 4:
-
-            # Compute weighted activations
-
-            weights = self.gradients.mean(dim=(2, 3), keepdim=True)
-
-            cam = (weights * self.activations).sum(dim=1)
-
-            cam = F.relu(cam[0]).cpu().detach().numpy()
-
-        else:
-
-            raise RuntimeError(f"Unexpected tensor shapes: grad {self.gradients.shape}, activ {self.activations.shape}")
-
-       
-
+        
+        # Create one-hot encoding for the target class
+        one_hot = torch.zeros_like(output)
+        one_hot[0, class_idx] = 1
+        
+        # Backward pass
+        output.backward(gradient=one_hot, retain_graph=True)
+        
+        # Compute Grad-CAM
+        weights = self.gradients.mean(dim=(2, 3), keepdim=True)
+        cam = (weights * self.activations).sum(dim=1, keepdim=True)
+        cam = F.relu(cam)
+        
         # Normalize
-
-        cam_min, cam_max = cam.min(), cam.max()
-
-        if cam_max > cam_min:
-
-            cam = (cam - cam_min) / (cam_max - cam_min)
-
-        else:
-
-            cam = np.zeros_like(cam)
-
-       
-
-        return cam
+        cam = cam - cam.min()
+        cam = cam / (cam.max() + 1e-8)
+        
+        return cam, class_idx
 
 
 
