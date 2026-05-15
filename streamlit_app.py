@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image
 from ultralytics import YOLO
 import os
+from pathlib import Path
 
 
 # ============================================================================
@@ -44,6 +45,10 @@ class GradCAM:
         """Generate Grad-CAM heatmap"""
         self.model.eval()
         
+        # Ensure input has correct shape (B, C, H, W)
+        if input_tensor.dim() != 4:
+            raise ValueError(f"Input must be 4D tensor, got {input_tensor.dim()}D")
+        
         with torch.enable_grad():
             input_tensor.requires_grad_(True)
             output = self.model(input_tensor)
@@ -57,17 +62,23 @@ class GradCAM:
         score.backward(retain_graph=True)
         
         if self.gradients is None or self.activations is None:
-            raise RuntimeError("Failed to capture gradients")
+            raise RuntimeError("Failed to capture gradients or activations")
         
-        # Compute weighted activations
-        weights = self.gradients.mean(dim=(2, 3), keepdim=True)
-        cam = (weights * self.activations).sum(dim=1)
-        cam = F.relu(cam[0]).cpu().detach().numpy()
+        # Ensure gradients and activations are 4D (B, C, H, W)
+        if self.gradients.dim() == 4 and self.activations.dim() == 4:
+            # Compute weighted activations
+            weights = self.gradients.mean(dim=(2, 3), keepdim=True)
+            cam = (weights * self.activations).sum(dim=1)
+            cam = F.relu(cam[0]).cpu().detach().numpy()
+        else:
+            raise RuntimeError(f"Unexpected tensor shapes: grad {self.gradients.shape}, activ {self.activations.shape}")
         
         # Normalize
         cam_min, cam_max = cam.min(), cam.max()
         if cam_max > cam_min:
             cam = (cam - cam_min) / (cam_max - cam_min)
+        else:
+            cam = np.zeros_like(cam)
         
         return cam
 
@@ -86,6 +97,32 @@ def overlay_heatmap(image, heatmap, alpha=0.4):
         0
     )
     return result.astype(np.uint8)
+
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+@st.cache_resource
+def find_model_files(directory="weights"):
+    """Find all .pt model files in directory"""
+    models = []
+    if os.path.exists(directory):
+        for file in os.listdir(directory):
+            if file.endswith(".pt"):
+                models.append(file)
+    return sorted(models)
+
+
+@st.cache_resource
+def load_yolo_model(path):
+    """Load YOLO model"""
+    try:
+        model = YOLO(path)
+        return model
+    except Exception as e:
+        st.error(f"❌ Failed to load model: {e}")
+        return None
 
 
 # ============================================================================
@@ -108,11 +145,23 @@ st.write("Upload an image to classify and visualize model decisions")
 
 st.sidebar.header("⚙️ Settings")
 
-model_path = st.sidebar.text_input(
-    "Model Path",
-    value="weights/oral.pt",
-    help="Path to your YOLO .pt model file"
-)
+# Model selection dropdown
+available_models = find_model_files("weights")
+
+if available_models:
+    selected_model = st.sidebar.selectbox(
+        "Select Model",
+        options=available_models,
+        help="Choose a YOLO .pt model to use"
+    )
+    model_path = f"weights/{selected_model}"
+else:
+    st.sidebar.warning("⚠️ No .pt models found in weights/ directory")
+    model_path = st.sidebar.text_input(
+        "Model Path",
+        value="weights/oral.pt",
+        help="Path to your YOLO .pt model file"
+    )
 
 show_gradcam = st.sidebar.checkbox(
     "Show Grad-CAM Visualization",
@@ -136,20 +185,8 @@ conf_threshold = st.sidebar.slider(
     step=0.05
 )
 
-# ============================================================================
-# MODEL LOADING
-# ============================================================================
-
-@st.cache_resource
-def load_yolo_model(path):
-    """Load YOLO model"""
-    try:
-        model = YOLO(path)
-        return model
-    except Exception as e:
-        st.error(f"❌ Failed to load model: {e}")
-        return None
-
+st.sidebar.divider()
+st.sidebar.caption("Model will be cached after first load for faster inference")
 
 # ============================================================================
 # MAIN APP
@@ -178,6 +215,7 @@ if uploaded_file is not None:
     # Check model exists
     if not os.path.exists(model_path):
         st.error(f"❌ Model not found: {model_path}")
+        st.info(f"Looking for model at: `{model_path}`")
         st.stop()
     
     # Load model
@@ -228,8 +266,13 @@ if uploaded_file is not None:
             
             try:
                 with st.spinner("Generating Grad-CAM..."):
-                    # Prepare input
+                    # Prepare input - ensure proper normalization
                     image_tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+                    
+                    # Ensure correct dimensions
+                    if image_tensor.dim() != 4:
+                        raise ValueError(f"Expected 4D tensor, got {image_tensor.dim()}D")
+                    
                     device = next(model.parameters()).device
                     image_tensor = image_tensor.to(device)
                     
@@ -248,8 +291,11 @@ if uploaded_file is not None:
                     )
                     
             except Exception as e:
-                st.error(f"❌ Grad-CAM error: {str(e)[:100]}")
-                st.info("Try disabling Grad-CAM or checking your model architecture")
+                st.error(f"❌ Grad-CAM error: {str(e)}")
+                st.info("Possible causes:")
+                st.info("- Model architecture may not support Grad-CAM")
+                st.info("- Try using a standard YOLO model (n, s, m, l, x sizes)")
+                st.info("- Disable Grad-CAM and use app without visualization")
 
 else:
     st.info("👆 Upload an image to get started")
@@ -258,18 +304,36 @@ else:
         st.markdown("""
         ### Features
         - **YOLO Classification**: Fast, accurate predictions
+        - **Model Selection**: Choose from available models via dropdown
         - **Grad-CAM Visualization**: Understand model decisions
         - **Top-K Predictions**: See alternative classifications
         - **Confidence Display**: Know how certain the model is
         
         ### How it works
-        1. Upload an image (JPG, JPEG, or PNG)
-        2. Model classifies the image
-        3. Grad-CAM shows which regions influenced the decision
-        4. Red = high importance, Blue = low importance
+        1. Select a model from the dropdown (or specify path)
+        2. Upload an image (JPG, JPEG, or PNG)
+        3. Model classifies the image
+        4. Grad-CAM shows which regions influenced the decision
+        5. Red = high importance, Blue = low importance
         
         ### Tips
         - Adjust heatmap opacity for better visibility
         - Check confidence scores to verify predictions
         - Use threshold to filter low-confidence predictions
+        - Different models may have different performance
+        
+        ### Supported Models
+        - YOLO Classification models (.pt format)
+        - Standard YOLO sizes: nano, small, medium, large, xlarge
         """)
+    
+    # Show available models
+    st.divider()
+    st.subheader("📦 Available Models")
+    if available_models:
+        st.success(f"Found {len(available_models)} model(s):")
+        for model_file in available_models:
+            st.write(f"• `{model_file}`")
+    else:
+        st.warning("No models found in `weights/` directory")
+        st.info("Place your YOLO .pt files in the `weights/` folder")
