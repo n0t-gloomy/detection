@@ -19,28 +19,32 @@ class GradCAM:
         self.gradients = None
         self.activations = None
 
-        # Register hooks
-        target_layer.register_forward_hook(self.save_activation)
-        target_layer.register_full_backward_hook(self.save_gradient)
+        # Forward hook: capture activations
+        def forward_hook(module, input, output):
+            # Register a tensor-level grad hook here to avoid
+            # the BackwardHookFunctionBackward view+inplace error
+            # that register_full_backward_hook causes in newer PyTorch
+            act = output.clone()
+            act.retain_grad()
+            self.activations = act
 
-    def save_activation(self, module, input, output):
-        self.activations = output.clone().detach()
+            def grad_hook(grad):
+                self.gradients = grad.clone()
 
-    def save_gradient(self, module, grad_input, grad_output):
-        self.gradients = grad_output[0].clone().detach()
+            act.register_hook(grad_hook)
+            return act  # return the clone so downstream ops use it
+
+        target_layer.register_forward_hook(forward_hook)
 
     def __call__(self, x, class_idx=None):
         self.model.eval()
 
-        # Grad-CAM needs gradients — ensure they're enabled regardless of
-        # any outer torch.no_grad() context (e.g. Streamlit / YOLO inference)
         with torch.enable_grad():
-            # Input must participate in the computation graph
             x = x.requires_grad_(True)
 
             output = self.model(x)
 
-            # Unwrap list/tuple outputs (e.g. YOLO returns (tensor, ...) or [tensor])
+            # Unwrap list/tuple outputs
             while isinstance(output, (list, tuple)):
                 output = output[0]
 
@@ -53,8 +57,15 @@ class GradCAM:
             one_hot = torch.zeros_like(output)
             one_hot[0, class_idx] = 1
 
-            # Backward pass
+            # Backward pass — gradients flow into the tensor hook above
             output.backward(gradient=one_hot, retain_graph=True)
+
+        if self.gradients is None:
+            raise RuntimeError(
+                "Gradients were not captured. The target layer may not be "
+                "in the forward path for this input, or the model short-circuits "
+                "before reaching it."
+            )
 
         # Compute Grad-CAM
         weights = self.gradients.mean(dim=(2, 3), keepdim=True)
