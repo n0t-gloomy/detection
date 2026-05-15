@@ -33,8 +33,8 @@ class GradCAM:
         self.model.eval()
         output = self.model(x)
 
-        # Handle list output from model
-        if isinstance(output, list):
+        # Unwrap list/tuple outputs (e.g. YOLO returns (tensor, ...) or [tensor])
+        while isinstance(output, (list, tuple)):
             output = output[0]
 
         if class_idx is None:
