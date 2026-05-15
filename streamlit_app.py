@@ -1,142 +1,10 @@
 import streamlit as st
 import torch
-import torch.nn.functional as F
-import cv2
 import numpy as np
 from PIL import Image
 from ultralytics import YOLO
 import os
 from pathlib import Path
-
-# ============================================================================
-# GRAD-CAM IMPLEMENTATION
-# ============================================================================
-
-class GradCAM:
-    def __init__(self, model, target_layer):
-        self.model = model
-        self.target_layer = target_layer
-        self.gradients = None
-        self.activations = None
-
-        # Forward hook: capture activations + register tensor-level grad hook.
-        # We avoid retain_grad() because it errors inside torch.no_grad() contexts
-        # (which YOLO's inference uses). Instead we rely solely on register_hook
-        # on the cloned tensor, which is sufficient to capture gradients.
-        def forward_hook(module, input, output):
-            act = output.clone()          # break the view — owns its own memory
-            self.activations = act.detach()
-
-            def grad_hook(grad):
-                self.gradients = grad.clone().detach()
-
-            act.register_hook(grad_hook)
-            return act  # return clone so the rest of the graph uses it
-
-        target_layer.register_forward_hook(forward_hook)
-
-    def __call__(self, x, class_idx=None):
-        self.model.eval()
-
-        with torch.enable_grad():
-            x = x.requires_grad_(True)
-
-            output = self.model(x)
-
-            # Unwrap list/tuple outputs
-            while isinstance(output, (list, tuple)):
-                output = output[0]
-
-            if class_idx is None:
-                class_idx = output.argmax(dim=1).item()
-
-            self.model.zero_grad()
-
-            # One-hot encode the target class
-            one_hot = torch.zeros_like(output)
-            one_hot[0, class_idx] = 1
-
-            # Backward pass — gradients flow into the tensor hook above
-            output.backward(gradient=one_hot, retain_graph=True)
-
-        if self.gradients is None:
-            raise RuntimeError(
-                "Gradients were not captured. The target layer may not be "
-                "in the forward path for this input, or the model short-circuits "
-                "before reaching it."
-            )
-
-        # Compute Grad-CAM
-        weights = self.gradients.mean(dim=(2, 3), keepdim=True)
-        cam = (weights * self.activations).sum(dim=1, keepdim=True)
-        cam = F.relu(cam)
-
-        # Normalize
-        cam = cam - cam.min()
-        cam = cam / (cam.max() + 1e-8)
-
-        return cam, class_idx
-
-
-def overlay_heatmap(image, heatmap, alpha=0.4):
-    """Overlay heatmap on image"""
-    h, w = image.shape[:2]
-    heatmap = cv2.resize(heatmap, (w, h))
-    heatmap_uint8 = (heatmap * 255).astype(np.uint8)
-    heatmap_color = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
-    heatmap_color = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2RGB)
-    result = cv2.addWeighted(
-        image.astype(np.float32), 1 - alpha,
-        heatmap_color.astype(np.float32), alpha,
-        0
-    )
-    return result.astype(np.uint8)
-
-
-def resize_image_for_yolo(image_array, target_size=640):
-    """
-    Resize image to YOLO-compatible size (divisible by 32)
-    """
-    if target_size % 32 != 0:
-        target_size = (target_size // 32) * 32
-
-    image_pil = Image.fromarray(image_array)
-    image_resized = image_pil.resize((target_size, target_size), Image.Resampling.LANCZOS)
-    return np.array(image_resized)
-
-
-def get_target_layer(model):
-    """
-    Automatically find the best target layer for Grad-CAM
-    from a YOLO classification model.
-    Tries multiple fallbacks.
-    """
-    inner = model.model  # nn.Sequential of YOLO layers
-
-    # Try the second-to-last layer first, then walk back
-    for offset in [2, 3, 1]:
-        try:
-            layer = inner.model[-offset]
-            # Make sure it has parameters (is a real conv layer)
-            params = list(layer.parameters())
-            if params:
-                return layer
-        except (IndexError, AttributeError):
-            continue
-
-    # Last resort: scan for the last Conv-like layer with weights
-    last_conv = None
-    for module in model.model.modules():
-        if hasattr(module, 'weight') and module.weight is not None and module.weight.dim() == 4:
-            last_conv = module
-    if last_conv is not None:
-        return last_conv
-
-    raise RuntimeError(
-        "Could not find a suitable target layer for Grad-CAM. "
-        "Your model architecture may not be supported."
-    )
-
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -202,34 +70,12 @@ else:
         help="Path to your YOLO .pt model file"
     )
 
-show_gradcam = st.sidebar.checkbox(
-    "Show Grad-CAM Visualization",
-    value=True,
-    help="Enable visual explanation of predictions"
-)
-
-heatmap_alpha = st.sidebar.slider(
-    "Heatmap Opacity",
-    min_value=0.0,
-    max_value=1.0,
-    value=0.5,
-    step=0.05
-)
-
 conf_threshold = st.sidebar.slider(
     "Confidence Threshold",
     min_value=0.0,
     max_value=1.0,
     value=0.0,
     step=0.05
-)
-
-# Image size for Grad-CAM (must be divisible by 32)
-grad_cam_size = st.sidebar.selectbox(
-    "Grad-CAM Image Size",
-    options=[320, 416, 512, 640, 704, 768],
-    index=3,  # Default 640
-    help="Larger = better quality but slower. Must be divisible by 32"
 )
 
 st.sidebar.divider()
@@ -307,65 +153,6 @@ if uploaded_file is not None:
                         text=f"{class_name}: {conf_val:.1%}"
                     )
 
-        # ====================================================================
-        # GRAD-CAM VISUALIZATION  (fixed)
-        # ====================================================================
-        if show_gradcam:
-            st.divider()
-            st.subheader("🔍 Grad-CAM Visualization")
-            st.write("**Red regions** = high importance | **Blue regions** = low importance")
-
-            try:
-                with st.spinner(f"Generating Grad-CAM (resizing to {grad_cam_size}×{grad_cam_size})..."):
-
-                    # Resize image to YOLO-compatible size
-                    image_resized = resize_image_for_yolo(image_np, target_size=grad_cam_size)
-
-                    # Prepare tensor
-                    image_tensor = (
-                        torch.from_numpy(image_resized)
-                        .permute(2, 0, 1)
-                        .unsqueeze(0)
-                        .float() / 255.0
-                    )
-
-                    # Validate dimensions
-                    b, c, h, w = image_tensor.shape
-                    if h % 32 != 0 or w % 32 != 0:
-                        raise ValueError(f"Image dimensions ({h}×{w}) not divisible by 32")
-
-                    device = next(model.model.parameters()).device
-                    image_tensor = image_tensor.to(device)
-
-                    # Find target layer; ensure its params have grad enabled
-                    # (YOLO may freeze weights during inference)
-                    target_layer = get_target_layer(model)
-                    for p in target_layer.parameters():
-                        p.requires_grad_(True)
-                    grad_cam = GradCAM(model.model, target_layer)
-
-                    # --- FIX: use __call__, unpack (cam, class_idx) tuple ---
-                    cam, _ = grad_cam(image_tensor, class_idx=top1_idx)
-
-                    # Convert CAM tensor → numpy heatmap
-                    heatmap = cam.squeeze().cpu().numpy()
-
-                    # Overlay on resized image
-                    visualization = overlay_heatmap(image_resized, heatmap, alpha=heatmap_alpha)
-
-                    st.image(
-                        Image.fromarray(visualization),
-                        caption=f"Grad-CAM ({grad_cam_size}×{grad_cam_size}) — '{top1_name}'",
-                        use_column_width=True
-                    )
-                    st.success("✅ Grad-CAM visualization generated successfully!")
-
-            except Exception as e:
-                st.error(f"❌ Grad-CAM error: {str(e)}")
-                st.info("**Troubleshooting:**")
-                st.info("• Verify your model is a YOLO classification model (not detection)")
-                st.info("• Try disabling Grad-CAM if the model architecture isn't supported")
-                st.info("• Check that the model file isn't corrupted")
 
     else:
         st.warning("⚠️ No classification probabilities found. Is this a YOLO **classification** model?")
