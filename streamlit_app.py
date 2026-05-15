@@ -33,9 +33,9 @@ class GradCAM:
         self.model.eval()
         output = self.model(x)
         
-        # YOLO classification output can be a list or custom type; extract raw logits tensor
-        if isinstance(output, list):
-            output = output[0]
+        # FIX: Explicitly extract the tensor from the output tuple/list
+        if isinstance(output, (tuple, list)):
+            output = output[0]  # The first element contains the main classification logits tensor
         elif hasattr(output, 'logits'):
             output = output.logits
             
@@ -44,7 +44,7 @@ class GradCAM:
             
         self.model.zero_grad()
         
-        # Create one-hot encoding for the target class
+        # Create one-hot encoding for the target class safely using the isolated tensor
         one_hot = torch.zeros_like(output)
         one_hot[0, class_idx] = 1
         
