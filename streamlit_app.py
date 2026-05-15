@@ -45,9 +45,13 @@ class GradCAM:
         """Generate Grad-CAM heatmap"""
         self.model.eval()
         
-        # Ensure input has correct shape (B, C, H, W)
+        # Ensure input has correct shape (B, C, H, W) and divisible by 32
         if input_tensor.dim() != 4:
             raise ValueError(f"Input must be 4D tensor, got {input_tensor.dim()}D")
+        
+        b, c, h, w = input_tensor.shape
+        if h % 32 != 0 or w % 32 != 0:
+            raise ValueError(f"Image dimensions ({h}, {w}) must be divisible by 32")
         
         with torch.enable_grad():
             input_tensor.requires_grad_(True)
@@ -97,6 +101,28 @@ def overlay_heatmap(image, heatmap, alpha=0.4):
         0
     )
     return result.astype(np.uint8)
+
+
+def resize_image_for_yolo(image_array, target_size=640):
+    """
+    Resize image to YOLO-compatible size (divisible by 32)
+    
+    Args:
+        image_array: numpy array (H, W, 3)
+        target_size: target size (default 640)
+    
+    Returns:
+        resized image array with dimensions divisible by 32
+    """
+    # Make sure dimensions are divisible by 32
+    if target_size % 32 != 0:
+        target_size = (target_size // 32) * 32
+    
+    # Resize using PIL for better quality
+    image_pil = Image.fromarray(image_array)
+    image_resized = image_pil.resize((target_size, target_size), Image.Resampling.LANCZOS)
+    
+    return np.array(image_resized)
 
 
 # ============================================================================
@@ -185,6 +211,14 @@ conf_threshold = st.sidebar.slider(
     step=0.05
 )
 
+# Image size for Grad-CAM (must be divisible by 32)
+grad_cam_size = st.sidebar.selectbox(
+    "Grad-CAM Image Size",
+    options=[320, 416, 512, 640, 704, 768],
+    index=3,  # Default 640
+    help="Larger = better quality but slower. Must be divisible by 32"
+)
+
 st.sidebar.divider()
 st.sidebar.caption("Model will be cached after first load for faster inference")
 
@@ -211,6 +245,7 @@ if uploaded_file is not None:
     with col1:
         st.subheader("Original Image")
         st.image(image, use_column_width=True)
+        st.caption(f"Size: {image.size[0]} × {image.size[1]}px")
     
     # Check model exists
     if not os.path.exists(model_path):
@@ -265,13 +300,20 @@ if uploaded_file is not None:
             )
             
             try:
-                with st.spinner("Generating Grad-CAM..."):
-                    # Prepare input - ensure proper normalization
-                    image_tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+                with st.spinner(f"Generating Grad-CAM (resizing to {grad_cam_size}×{grad_cam_size})..."):
+                    # Resize image to YOLO-compatible size
+                    image_resized = resize_image_for_yolo(image_np, target_size=grad_cam_size)
                     
-                    # Ensure correct dimensions
+                    # Prepare tensor
+                    image_tensor = torch.from_numpy(image_resized).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+                    
+                    # Validate dimensions
                     if image_tensor.dim() != 4:
                         raise ValueError(f"Expected 4D tensor, got {image_tensor.dim()}D")
+                    
+                    b, c, h, w = image_tensor.shape
+                    if h % 32 != 0 or w % 32 != 0:
+                        raise ValueError(f"Image dimensions ({h}, {w}) not divisible by 32")
                     
                     device = next(model.parameters()).device
                     image_tensor = image_tensor.to(device)
@@ -280,22 +322,24 @@ if uploaded_file is not None:
                     grad_cam = GradCAM(model)
                     heatmap = grad_cam.generate(image_tensor)
                     
-                    # Overlay
-                    visualization = overlay_heatmap(image_np, heatmap, alpha=heatmap_alpha)
+                    # Overlay on resized image
+                    visualization = overlay_heatmap(image_resized, heatmap, alpha=heatmap_alpha)
                     
                     # Display
                     st.image(
                         Image.fromarray(visualization),
-                        caption="Grad-CAM Heatmap",
+                        caption=f"Grad-CAM Heatmap ({grad_cam_size}×{grad_cam_size})",
                         use_column_width=True
                     )
                     
+                    st.success("✅ Grad-CAM visualization generated successfully!")
+                    
             except Exception as e:
                 st.error(f"❌ Grad-CAM error: {str(e)}")
-                st.info("Possible causes:")
-                st.info("- Model architecture may not support Grad-CAM")
-                st.info("- Try using a standard YOLO model (n, s, m, l, x sizes)")
-                st.info("- Disable Grad-CAM and use app without visualization")
+                st.info("**Possible causes:**")
+                st.info("• Model architecture may not support Grad-CAM")
+                st.info("• Try using a standard YOLO classification model")
+                st.info("• Disable Grad-CAM and use app without visualization")
 
 else:
     st.info("👆 Upload an image to get started")
@@ -306,6 +350,7 @@ else:
         - **YOLO Classification**: Fast, accurate predictions
         - **Model Selection**: Choose from available models via dropdown
         - **Grad-CAM Visualization**: Understand model decisions
+        - **Configurable Image Size**: Trade quality for speed
         - **Top-K Predictions**: See alternative classifications
         - **Confidence Display**: Know how certain the model is
         
@@ -313,14 +358,21 @@ else:
         1. Select a model from the dropdown (or specify path)
         2. Upload an image (JPG, JPEG, or PNG)
         3. Model classifies the image
-        4. Grad-CAM shows which regions influenced the decision
-        5. Red = high importance, Blue = low importance
+        4. Image is resized to a YOLO-compatible size (divisible by 32)
+        5. Grad-CAM shows which regions influenced the decision
+        6. Red = high importance, Blue = low importance
         
         ### Tips
-        - Adjust heatmap opacity for better visibility
-        - Check confidence scores to verify predictions
-        - Use threshold to filter low-confidence predictions
-        - Different models may have different performance
+        - **Image Size**: Larger size = better visualization but slower processing
+        - **Heatmap Opacity**: Adjust for better visibility
+        - **Confidence Threshold**: Filter low-confidence predictions
+        - **Different Models**: Try different models for different results
+        
+        ### Image Resizing
+        Images are automatically resized to YOLO-compatible dimensions:
+        - Must be divisible by 32 (e.g., 320, 416, 512, 640, 704, 768)
+        - Maintains aspect ratio with padding if needed
+        - Ensures Grad-CAM works properly
         
         ### Supported Models
         - YOLO Classification models (.pt format)
