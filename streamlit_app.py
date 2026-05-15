@@ -24,10 +24,10 @@ class GradCAM:
         target_layer.register_full_backward_hook(self.save_gradient)
 
     def save_activation(self, module, input, output):
-        self.activations = output.detach()
+        self.activations = output.clone().detach()
 
     def save_gradient(self, module, grad_input, grad_output):
-        self.gradients = grad_output[0].detach()
+        self.gradients = grad_output[0].clone().detach()
 
     def __call__(self, x, class_idx=None):
         self.model.eval()
