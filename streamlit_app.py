@@ -41,8 +41,14 @@ class GradCAM:
             last_conv.register_forward_hook(forward_hook)
             last_conv.register_full_backward_hook(backward_hook)
     
-    def generate(self, input_tensor):
-        """Generate Grad-CAM heatmap"""
+    def generate(self, input_tensor, target_class=None):
+        """
+        Generate Grad-CAM heatmap
+        
+        Args:
+            input_tensor: Input image tensor (B, C, H, W)
+            target_class: Target class index (if None, uses predicted class)
+        """
         self.model.eval()
         
         # Ensure input has correct shape (B, C, H, W) and divisible by 32
@@ -57,10 +63,23 @@ class GradCAM:
             input_tensor.requires_grad_(True)
             output = self.model(input_tensor)
             
+            # Handle different output formats
             if hasattr(output, 'probs'):
-                score = output.probs.data.max()
+                # Classification output with probs attribute
+                probs = output.probs.data  # Shape: (batch_size, num_classes)
+                if target_class is None:
+                    target_class = probs.argmax(dim=1)[0].item()
+                score = probs[0, target_class]  # Get score for target class
+            elif isinstance(output, torch.Tensor):
+                # Raw tensor output
+                if output.dim() > 1:
+                    if target_class is None:
+                        target_class = output.argmax(dim=1)[0].item()
+                    score = output[0, target_class]
+                else:
+                    score = output.max()
             else:
-                score = output.max()
+                raise ValueError(f"Unexpected output type: {type(output)}")
         
         self.model.zero_grad()
         score.backward(retain_graph=True)
@@ -318,9 +337,9 @@ if uploaded_file is not None:
                     device = next(model.parameters()).device
                     image_tensor = image_tensor.to(device)
                     
-                    # Generate Grad-CAM
+                    # Generate Grad-CAM with target class
                     grad_cam = GradCAM(model)
-                    heatmap = grad_cam.generate(image_tensor)
+                    heatmap = grad_cam.generate(image_tensor, target_class=top1_idx)
                     
                     # Overlay on resized image
                     visualization = overlay_heatmap(image_resized, heatmap, alpha=heatmap_alpha)
@@ -328,7 +347,7 @@ if uploaded_file is not None:
                     # Display
                     st.image(
                         Image.fromarray(visualization),
-                        caption=f"Grad-CAM Heatmap ({grad_cam_size}×{grad_cam_size})",
+                        caption=f"Grad-CAM Heatmap ({grad_cam_size}×{grad_cam_size}) for '{top1_name}'",
                         use_column_width=True
                     )
                     
@@ -336,10 +355,10 @@ if uploaded_file is not None:
                     
             except Exception as e:
                 st.error(f"❌ Grad-CAM error: {str(e)}")
-                st.info("**Possible causes:**")
-                st.info("• Model architecture may not support Grad-CAM")
-                st.info("• Try using a standard YOLO classification model")
-                st.info("• Disable Grad-CAM and use app without visualization")
+                st.info("**Troubleshooting:**")
+                st.info("• Verify your model is a YOLO classification model (not detection)")
+                st.info("• Try disabling Grad-CAM if the model architecture isn't supported")
+                st.info("• Check that the model file isn't corrupted")
 
 else:
     st.info("👆 Upload an image to get started")
@@ -364,19 +383,19 @@ else:
         
         ### Tips
         - **Image Size**: Larger size = better visualization but slower processing
-        - **Heatmap Opacity**: Adjust for better visibility
+        - **Heatmap Opacity**: Adjust for better visibility (0.3-0.7 recommended)
         - **Confidence Threshold**: Filter low-confidence predictions
         - **Different Models**: Try different models for different results
         
         ### Image Resizing
         Images are automatically resized to YOLO-compatible dimensions:
         - Must be divisible by 32 (e.g., 320, 416, 512, 640, 704, 768)
-        - Maintains aspect ratio with padding if needed
+        - Maintains aspect ratio
         - Ensures Grad-CAM works properly
         
         ### Supported Models
         - YOLO Classification models (.pt format)
-        - Standard YOLO sizes: nano, small, medium, large, xlarge
+        - Standard YOLO sizes: nano (n), small (s), medium (m), large (l), xlarge (x)
         """)
     
     # Show available models
