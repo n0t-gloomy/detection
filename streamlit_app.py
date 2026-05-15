@@ -30,28 +30,34 @@ class GradCAM:
         self.gradients = grad_output[0].detach()
 
     def __call__(self, x, class_idx=None):
-        self.model.eval()
-        output = self.model(x)
-        
-        # FIX: Explicitly extract the tensor from the output tuple/list
-        if isinstance(output, (tuple, list)):
-            output = output[0]  # The first element contains the main classification logits tensor
-        elif hasattr(output, 'logits'):
-            output = output.logits
+        # 1. Force gradients to be enabled even under eval() mode
+        with torch.enable_grad():
+            self.model.eval()
             
-        if class_idx is None:
-            class_idx = output.argmax(dim=1).item()
+            # Ensure the input tensor itself tracks gradients
+            x = x.clone().requires_grad_(True) 
             
-        self.model.zero_grad()
-        
-        # Create one-hot encoding for the target class safely using the isolated tensor
-        one_hot = torch.zeros_like(output)
-        one_hot[0, class_idx] = 1
-        
-        # Backward pass
-        output.backward(gradient=one_hot, retain_graph=True)
-        
-        # Compute Grad-CAM
+            output = self.model(x)
+            
+            # Extract the raw logits tensor from the YOLO output structure
+            if isinstance(output, (tuple, list)):
+                output = output[0]
+            elif hasattr(output, 'logits'):
+                output = output.logits
+                
+            if class_idx is None:
+                class_idx = output.argmax(dim=1).item()
+                
+            self.model.zero_grad()
+            
+            # Create one-hot encoding for the target class
+            one_hot = torch.zeros_like(output)
+            one_hot[0, class_idx] = 1
+            
+            # Backward pass (computation graph is now tracked successfully)
+            output.backward(gradient=one_hot, retain_graph=True)
+            
+        # Compute Grad-CAM (outside the gradient tracking block)
         weights = self.gradients.mean(dim=(2, 3), keepdim=True)
         cam = (weights * self.activations).sum(dim=1, keepdim=True)
         cam = F.relu(cam)
@@ -60,7 +66,6 @@ class GradCAM:
         cam = cam - cam.min()
         cam = cam / (cam.max() + 1e-8)
         
-        # Convert tensor matrix back to a 2D numpy array layout
         cam_np = cam.squeeze().cpu().numpy()
         return cam_np, class_idx
 
