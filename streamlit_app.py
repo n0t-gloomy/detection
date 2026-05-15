@@ -100,10 +100,9 @@ if uploaded_file:
 
         if st.button("🚀 Run Classification"):
             with st.spinner("Classifying..."):
-                label, score = models.classifier(
-                    img,
-                    model_data["weights_name"],
-                    model_data["class_names"]
+                label, score, cam_img = models.classifier(
+                img,
+                model_data["weights_name"]
                 )
                 st.session_state.prediction = (label, score)
 
@@ -113,6 +112,8 @@ if uploaded_file:
             label, score = st.session_state.prediction
 
             st.markdown(f"""
+                <br><br>
+                st.image(cam_img, caption="🔥 Grad-CAM", use_container_width=True)
                 <br><br>
                 <h3>📷 Prediction: <code>{label}</code></h3>
                 <h4>🔢 Confidence: <code>{score*100:.1f}%</code></h4>
