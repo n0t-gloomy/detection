@@ -6,4 +6,4 @@ numpy
 pillow
 opencv-python-headless
 matplotlib
-grad_cam
+grad_cam_simple
