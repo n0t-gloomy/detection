@@ -3,7 +3,7 @@ from PIL import Image
 import torch
 from ultralytics import YOLO
 import numpy as np
-from grad_cam_simple import create_grad_cam_visualization
+from grad_cam import create_grad_cam_visualization
 import os
  
 # Page configuration
