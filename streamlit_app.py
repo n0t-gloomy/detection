@@ -19,20 +19,19 @@ class GradCAM:
         self.gradients = None
         self.activations = None
 
-        # Forward hook: capture activations
+        # Forward hook: capture activations + register tensor-level grad hook.
+        # We avoid retain_grad() because it errors inside torch.no_grad() contexts
+        # (which YOLO's inference uses). Instead we rely solely on register_hook
+        # on the cloned tensor, which is sufficient to capture gradients.
         def forward_hook(module, input, output):
-            # Register a tensor-level grad hook here to avoid
-            # the BackwardHookFunctionBackward view+inplace error
-            # that register_full_backward_hook causes in newer PyTorch
-            act = output.clone()
-            act.retain_grad()
-            self.activations = act
+            act = output.clone()          # break the view — owns its own memory
+            self.activations = act.detach()
 
             def grad_hook(grad):
-                self.gradients = grad.clone()
+                self.gradients = grad.clone().detach()
 
             act.register_hook(grad_hook)
-            return act  # return the clone so downstream ops use it
+            return act  # return clone so the rest of the graph uses it
 
         target_layer.register_forward_hook(forward_hook)
 
