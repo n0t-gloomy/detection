@@ -31,23 +31,30 @@ class GradCAM:
 
     def __call__(self, x, class_idx=None):
         self.model.eval()
-        output = self.model(x)
 
-        # Unwrap list/tuple outputs (e.g. YOLO returns (tensor, ...) or [tensor])
-        while isinstance(output, (list, tuple)):
-            output = output[0]
+        # Grad-CAM needs gradients — ensure they're enabled regardless of
+        # any outer torch.no_grad() context (e.g. Streamlit / YOLO inference)
+        with torch.enable_grad():
+            # Input must participate in the computation graph
+            x = x.requires_grad_(True)
 
-        if class_idx is None:
-            class_idx = output.argmax(dim=1).item()
+            output = self.model(x)
 
-        self.model.zero_grad()
+            # Unwrap list/tuple outputs (e.g. YOLO returns (tensor, ...) or [tensor])
+            while isinstance(output, (list, tuple)):
+                output = output[0]
 
-        # Create one-hot encoding for the target class
-        one_hot = torch.zeros_like(output)
-        one_hot[0, class_idx] = 1
+            if class_idx is None:
+                class_idx = output.argmax(dim=1).item()
 
-        # Backward pass
-        output.backward(gradient=one_hot, retain_graph=True)
+            self.model.zero_grad()
+
+            # One-hot encode the target class
+            one_hot = torch.zeros_like(output)
+            one_hot[0, class_idx] = 1
+
+            # Backward pass
+            output.backward(gradient=one_hot, retain_graph=True)
 
         # Compute Grad-CAM
         weights = self.gradients.mean(dim=(2, 3), keepdim=True)
@@ -320,8 +327,11 @@ if uploaded_file is not None:
                     device = next(model.model.parameters()).device
                     image_tensor = image_tensor.to(device)
 
-                    # --- FIX: find target layer automatically, pass both args ---
+                    # Find target layer; ensure its params have grad enabled
+                    # (YOLO may freeze weights during inference)
                     target_layer = get_target_layer(model)
+                    for p in target_layer.parameters():
+                        p.requires_grad_(True)
                     grad_cam = GradCAM(model.model, target_layer)
 
                     # --- FIX: use __call__, unpack (cam, class_idx) tuple ---
