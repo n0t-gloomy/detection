@@ -1,18 +1,15 @@
+import os
+
 import streamlit as st
 import torch
-import numpy as np
 from PIL import Image
-from ultralytics import YOLO
-import os
-from pathlib import Path
 
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
+from gradcam_cls import gradcam_overlay, list_debug_conv_layer_names
+
 
 @st.cache_resource
 def find_model_files(directory="weights"):
-    """Find all .pt model files in directory"""
+    """Find all .pt model files in directory."""
     models = []
     if os.path.exists(directory):
         for file in os.listdir(directory):
@@ -23,43 +20,35 @@ def find_model_files(directory="weights"):
 
 @st.cache_resource
 def load_yolo_model(path):
-    """Load YOLO model"""
+    """Load YOLO model (cached)."""
     try:
-        model = YOLO(path)
-        return model
+        from ultralytics import YOLO
+
+        return YOLO(path)
     except Exception as e:
         st.error(f"❌ Failed to load model: {e}")
         return None
 
 
-# ============================================================================
-# STREAMLIT APP
-# ============================================================================
-
 st.set_page_config(
     page_title="YOLO Classification",
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 st.title("🧠 YOLO Classification")
-st.write("Upload an image to classify and visualize model decisions")
-
-# ============================================================================
-# SIDEBAR CONFIGURATION
-# ============================================================================
+st.write("Upload an image to classify and optionally visualize **Grad-CAM** for the top prediction.")
 
 st.sidebar.header("⚙️ Settings")
 
-# Model selection dropdown
 available_models = find_model_files("weights")
 
 if available_models:
     selected_model = st.sidebar.selectbox(
         "Select Model",
         options=available_models,
-        help="Choose a YOLO .pt model to use"
+        help="Choose a YOLO .pt model to use",
     )
     model_path = f"weights/{selected_model}"
 else:
@@ -67,7 +56,7 @@ else:
     model_path = st.sidebar.text_input(
         "Model Path",
         value="weights/oral.pt",
-        help="Path to your YOLO .pt model file"
+        help="Path to your YOLO .pt model file",
     )
 
 conf_threshold = st.sidebar.slider(
@@ -75,95 +64,113 @@ conf_threshold = st.sidebar.slider(
     min_value=0.0,
     max_value=1.0,
     value=0.0,
-    step=0.05
+    step=0.05,
 )
 
-st.sidebar.divider()
-st.sidebar.caption("Model will be cached after first load for faster inference")
+show_gradcam = st.sidebar.checkbox(
+    "Show Grad-CAM (top-1)",
+    value=False,
+    help="Explains the predicted class only. Uses the same resize/scale as typical YOLO-cls (RGB, imgsz from checkpoint, ÷255).",
+)
 
-# ============================================================================
-# MAIN APP
-# ============================================================================
+cam_layer_name: str | None = None
+cam_alpha = 0.45
+if os.path.exists(model_path):
+    _warm = load_yolo_model(model_path)
+    if _warm is not None:
+        with st.sidebar.expander("Advanced: Grad-CAM layer (debug)", expanded=False):
+            _names = list_debug_conv_layer_names(_warm)
+            _choice = st.selectbox(
+                "Convolution layer",
+                options=["Auto (recommended)"] + _names,
+                index=0,
+                help="Override only if you are debugging heatmaps. Default picks the last spatial conv map.",
+            )
+            cam_layer_name = None if _choice.startswith("Auto") else _choice
+            cam_alpha = st.slider("Overlay strength", 0.2, 0.8, 0.45, 0.05)
+
+st.sidebar.divider()
+st.sidebar.caption("Model is cached after first load for faster inference.")
 
 uploaded_file = st.file_uploader(
     "📤 Upload an image",
     type=["jpg", "jpeg", "png", "webp"],
-    help="Supported formats: JPG, JPEG, PNG, WEBP"
+    help="Supported formats: JPG, JPEG, PNG, WEBP",
 )
 
 if uploaded_file is not None:
-    # Load image
     image = Image.open(uploaded_file)
-
-    # Ensure RGB (drop alpha channel if present)
     if image.mode != "RGB":
         image = image.convert("RGB")
 
-    image_np = np.array(image)
-
-    # Create columns
-    col1, col2 = st.columns(2)
-
-    # Display original image
-    with col1:
-        st.subheader("Original Image")
-        st.image(image, use_column_width=True)
-        st.caption(f"Size: {image.size[0]} × {image.size[1]}px")
-
-    # Check model exists
     if not os.path.exists(model_path):
-        st.error(f"❌ Model not found: {model_path}")
-        st.info(f"Looking for model at: `{model_path}`")
+        st.error(f"❌ Model not found: `{model_path}`")
         st.stop()
 
-    # Load model
     model = load_yolo_model(model_path)
     if model is None:
         st.stop()
 
-    # Inference
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Original Image")
+        st.image(image, use_container_width=True)
+        st.caption(f"Size: {image.size[0]} × {image.size[1]} px")
+
     with st.spinner("🔄 Running inference..."):
         results = model(image)
         result = results[0]
 
-    # Extract predictions
-    if hasattr(result, 'probs') and result.probs is not None:
+    if hasattr(result, "probs") and result.probs is not None:
         probs = result.probs.data
-        top1_idx = probs.argmax().item()
-        top1_conf = probs[top1_idx].item()
+        top1_idx = int(probs.argmax().item())
+        top1_conf = float(probs[top1_idx].item())
         top1_name = result.names[top1_idx]
 
-        # Display predictions
         with col2:
             st.subheader("🎯 Prediction")
             st.metric("Class", top1_name)
             st.metric("Confidence", f"{top1_conf:.1%}")
 
-            # Top-K predictions
             st.subheader("Top Predictions")
             top_k = min(5, len(result.names))
             top_confs, top_indices = torch.topk(probs.squeeze(), k=top_k)
 
             for conf, idx in zip(top_confs, top_indices):
                 class_name = result.names[idx.item()]
-                conf_val = conf.item()
+                conf_val = float(conf.item())
                 if conf_val >= conf_threshold:
-                    st.progress(
-                        conf_val,
-                        text=f"{class_name}: {conf_val:.1%}"
+                    st.progress(conf_val, text=f"{class_name}: {conf_val:.1%}")
+
+        if show_gradcam:
+            st.subheader("Grad-CAM (top-1)")
+            st.caption(
+                f"Explaining **{top1_name}** (class index {top1_idx}). "
+                "Input is resized to the model `imgsz` (from your `.pt`, else 640), then overlaid on the original upload."
+            )
+            with st.spinner("Generating Grad-CAM…"):
+                try:
+                    overlay_rgb = gradcam_overlay(
+                        model,
+                        image,
+                        top1_class_idx=top1_idx,
+                        layer_name=cam_layer_name,
+                        alpha=float(cam_alpha),
                     )
-
-
+                    st.image(overlay_rgb, use_container_width=True, caption="Grad-CAM overlay (jet colormap)")
+                except Exception as e:
+                    st.error("Grad-CAM failed — try another layer under Advanced, or run on GPU if you see half-precision/CPU errors.")
+                    st.exception(e)
     else:
         with col2:
             st.warning("⚠️ No classification probabilities found.")
-            # Try to show detection boxes if this is a detection model
-            if hasattr(result, 'boxes' ) and result.boxes is not None and len(result.boxes):
+            if hasattr(result, "boxes") and result.boxes is not None and len(result.boxes):
                 st.info("This looks like a **detection** model (not classification). Detections found:")
                 for box in result.boxes:
                     cls_id = int(box.cls.item())
                     cls_name = result.names[cls_id]
-                    conf = box.conf.item()
+                    conf = float(box.conf.item())
                     st.write(f"• `{cls_name}` — {conf:.1%}")
             else:
                 st.info("Make sure your model was trained for **classification** (not detection/segmentation).")
@@ -171,37 +178,19 @@ if uploaded_file is not None:
 else:
     st.info("👆 Upload an image to get started")
 
-# ============================================================================
-# ABOUT EXPANDER
-# ============================================================================
-
 with st.expander("ℹ️ About this app"):
-    st.markdown("""
+    st.markdown(
+        """
 ### Features
-- **YOLO Classification**: Fast, accurate predictions
-- **Model Selection**: Choose from available models via dropdown
-- **Top-K Predictions**: See alternative classifications with confidence scores
-- **Confidence Threshold**: Filter out low-confidence predictions
+- **YOLO Classification** inference via Ultralytics
+- **Grad-CAM** for the **top-1** class (optional)
+- **Advanced layer override** (hidden in sidebar) for debugging only
 
-### How it works
-1. Select a model from the dropdown (or specify path)
-2. Upload an image (JPG, JPEG, PNG, or WEBP)
-3. Model classifies the image and returns probabilities
-4. Top predictions are displayed with a progress bar
-
-### Tips
-- **Confidence Threshold**: Raise it to hide low-confidence classes
-- **Different Models**: Different .pt files may be trained on different classes
-- **Image formats**: RGBA/palette PNGs are auto-converted to RGB
-
-### Supported Models
-- YOLO Classification models (.pt format)
-- Standard YOLO sizes: nano (n), small (s), medium (m), large (l), xlarge (x)
-""")
-
-# ============================================================================
-# AVAILABLE MODELS SECTION
-# ============================================================================
+### Grad-CAM notes
+- Uses logits for the predicted class index and a convolutional feature map (auto layer unless you override).
+- Preprocessing matches common YOLO-cls defaults: **RGB**, **square resize to `imgsz`**, **÷255**. `imgsz` is read from the checkpoint when available (your cloud training used **640**).
+"""
+    )
 
 st.divider()
 st.subheader("📦 Available Models")
@@ -212,4 +201,4 @@ if available_models:
         st.write(f"• `{model_file}`")
 else:
     st.warning("No models found in `weights/` directory")
-    st.info("Place your YOLO .pt files in the `weights/` folder")
+    st.info("Place your YOLO `.pt` files in the `weights/` folder.")
