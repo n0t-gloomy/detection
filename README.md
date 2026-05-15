@@ -1,6 +1,6 @@
-# 🧠 Medical Image Classification Web App
+# 🧠 Image Classification Web App
 
-A Streamlit-based web application for classifying oral medical conditions using a deep learning model trained with YOLO (Ultralytics). Users can upload an image and receive predicted labels with confidence scores in real time.
+A Streamlit-based web application for classifying datas using a deep learning model trained with YOLO (Ultralytics). Users can upload an image and receive predicted labels with confidence scores in real time.
 
 # 🚀 Features
 📤 Upload images (.jpg, .jpeg, .png)
@@ -20,7 +20,7 @@ A Streamlit-based web application for classifying oral medical conditions using 
 .
 ├── streamlit_app.py     # Main Streamlit application
 ├── models.py            # Model loading and inference logic
-├── exp-3.pt             # Trained YOLO model weights
+├── oral.pt              # Trained YOLO model weights
 ├── img.jpg              # Background image (optional)
 ├── requirements.txt     # Python dependencies
 └── README.md            # Project documentation
@@ -32,7 +32,6 @@ Format: .pt (PyTorch)
 
 Task Type : Classification
 
-Supported Classes : Canker Sores, Cold Sores, Mouth Cancer, Normal, Oral Thrush
 
 # ⚙️ Installation
 1. Clone the repository
