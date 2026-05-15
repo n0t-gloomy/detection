@@ -66,11 +66,8 @@ def _pick_target_layer(
                 return m, name
         raise ValueError(f"Layer '{layer_name}' not found or not Conv2d")
 
-    # Auto: probe each Conv2d output shape; prefer the last conv with enough spatial
-    # resolution for a meaningful map (avoids tiny tail 1×1 / head convs that differ by build).
     probe = torch.zeros(1, 3, imgsz, imgsz, device=device, dtype=next(net.parameters()).dtype)
     handles: list = []
-    # (module, name, H, W) in forward order
     spatial_trace: list[tuple[nn.Module, str, int, int]] = []
 
     def make_hook(n: str):
@@ -92,7 +89,6 @@ def _pick_target_layer(
             h.remove()
 
     if spatial_trace:
-        # e.g. 640 → min side ≥ 10: skip only the very deepest 1–2 px maps if any slipped through
         min_side = max(4, imgsz // 64)
         good = [t for t in spatial_trace if min(t[2], t[3]) >= min_side]
         pick = good[-1] if good else spatial_trace[-1]

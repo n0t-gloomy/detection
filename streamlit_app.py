@@ -189,6 +189,9 @@ with st.expander("ℹ️ About this app"):
 ### Grad-CAM notes
 - Uses logits for the predicted class index and a convolutional feature map (auto layer unless you override).
 - Preprocessing matches common YOLO-cls defaults: **RGB**, **square resize to `imgsz`**, **÷255**. `imgsz` is read from the checkpoint when available (your cloud training used **640**).
+
+### Notices
+- This program is a non-commercial product. Do not use for commercial uses. All rights reserved.
 """
     )
 
