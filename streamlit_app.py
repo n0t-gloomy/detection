@@ -29,7 +29,7 @@ from pathlib import Path
 
 
 class GradCAM:
-    def __init__(self, model, target_layer):
+    def __init__(self, model, target_layer = -1):
         self.model = model
         self.target_layer = target_layer
         self.gradients = None
