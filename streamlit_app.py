@@ -37,13 +37,13 @@ def load_yolo_model(path):
 # ============================================================================
 
 st.set_page_config(
-    page_title="YOLO Classification with Grad-CAM",
+    page_title="YOLO Classification",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🧠 YOLO Classification with Grad-CAM")
+st.title("🧠 YOLO Classification")
 st.write("Upload an image to classify and visualize model decisions")
 
 # ============================================================================
