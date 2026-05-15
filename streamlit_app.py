@@ -158,7 +158,7 @@ if uploaded_file is not None:
         with col2:
             st.warning("⚠️ No classification probabilities found.")
             # Try to show detection boxes if this is a detection model
-            if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes):
+            if hasattr(result, 'boxes' ) and result.boxes is not None and len(result.boxes):
                 st.info("This looks like a **detection** model (not classification). Detections found:")
                 for box in result.boxes:
                     cls_id = int(box.cls.item())
