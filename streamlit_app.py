@@ -231,12 +231,12 @@ with st.expander("ℹ️ About this app"):
     )
 
 st.divider()
-st.subheader("📦 Available Models")
 
-if available_models:
-    st.success(f"Found {len(available_models)} model(s):")
-    for model_file in available_models:
-        st.write(f"• `{model_file}`")
-else:
-    st.warning("No models found in `weights/` directory")
-    st.info("Place your model `.pt` files in the `weights/` folder.")
+with st.expander("📦 Available Models"):
+    if available_models:
+        st.success(f"Found {len(available_models)} model(s):")
+        for model_file in available_models:
+            st.write(f"• `{model_file}`")
+    else:
+        st.warning("No models found in `weights/` directory")
+        st.info("Place your model `.pt` files in the `weights/` folder.")
