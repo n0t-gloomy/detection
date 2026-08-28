@@ -82,7 +82,8 @@ if available_models:
     selected_model = st.sidebar.selectbox(
         "Select Model",
         options=available_models,
-        help="Choose a YOLO .pt model to use",
+        index = 1,
+        help="Choose a model to use",
     )
     model_path = f"weights/{selected_model}"
 else:
@@ -90,7 +91,7 @@ else:
     model_path = st.sidebar.text_input(
         "Model Path",
         value="weights/oral.pt",
-        help="Path to your YOLO .pt model file",
+        help="Path to your model file",
     )
 
 conf_threshold = st.sidebar.slider(
@@ -216,7 +217,7 @@ with st.expander("ℹ️ About this app"):
     st.markdown(
         """
 ### Features
-- **YOLO Classification** inference via Ultralytics
+- **Oral Lesion Classification** inference
 - **Grad-CAM** for the **top-1** class (optional)
 - **Advanced layer override** (hidden in sidebar) for debugging only
 
@@ -238,4 +239,4 @@ if available_models:
         st.write(f"• `{model_file}`")
 else:
     st.warning("No models found in `weights/` directory")
-    st.info("Place your YOLO `.pt` files in the `weights/` folder.")
+    st.info("Place your model `.pt` files in the `weights/` folder.")
