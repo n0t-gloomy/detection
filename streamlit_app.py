@@ -229,9 +229,6 @@ with st.expander("ℹ️ About this app"):
 - This program is a non-commercial product. Do not use for commercial uses. All rights reserved.
 """
     )
-
-st.divider()
-
 with st.expander("📦 Available Models"):
     if available_models:
         st.success(f"Found {len(available_models)} model(s):")
