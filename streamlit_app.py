@@ -31,13 +31,13 @@ def load_yolo_model(path):
 
 
 st.set_page_config(
-    page_title="YOLO Classification",
+    page_title="Oral Lesion Classification",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 st.set_page_config(
-    page_title="YOLO Classification",
+    page_title="Oral Lesion Classification",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -71,7 +71,7 @@ if not st.session_state.warning_accepted:
     show_warning()
     st.stop()
     
-st.title("🧠 YOLO Classification")
+st.title("🧠 Oral Lesion Classification")
 st.write("Upload an image to classify and optionally visualize **Grad-CAM** for the top prediction.")
 
 st.sidebar.header("⚙️ Settings")
@@ -103,7 +103,7 @@ conf_threshold = st.sidebar.slider(
 
 show_gradcam = st.sidebar.checkbox(
     "Show Grad-CAM (top-1)",
-    value=False,
+    value=True,
     help="Explains the predicted class only. Uses the same resize/scale as typical YOLO-cls (RGB, imgsz from checkpoint, ÷255).",
 )
 
